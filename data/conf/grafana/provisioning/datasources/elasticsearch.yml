@@ -1,0 +1,26 @@
+apiVersion: 1
+
+datasources:
+  - name: dmarc-ag
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    jsonData:
+      index: "*_dmarc_aggregate*"
+      timeField: "date_begin"
+      esVersion: "8.0.0"
+      logMessageField: "report_metadata.org_name"
+      logLevelField: "policy_published.policy_pct_dmarc_pass"
+    editable: true
+
+  - name: dmarc-fo
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    jsonData:
+      index: "*_dmarc_forensic*"
+      timeField: "arrival_date_utc"
+      esVersion: "8.0.0"
+      logMessageField: "subject"
+      logLevelField: "auth_failure.dkim_result"
+    editable: true

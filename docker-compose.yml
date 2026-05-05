@@ -1,13 +1,11 @@
-version: '2.4'
-
 services:
   parsedmarc-init:
-    image: patschi/parsedmarc:init
+    image: ghcr.io/nachotek/parsedmarc-init:latest
     restart: always
     volumes:
-      - ./data/conf/parsedmarc/:/etc/parsedmarc/:rw
-      - ./data/conf/nginx/ssl/:/etc/nginx/ssl/:rw
-      - ./data/data/elasticsearch:/usr/share/elasticsearch/data/:rw
+      - parsedmarc_conf:/etc/parsedmarc/:rw
+      - elasticsearch_data:/usr/share/elasticsearch/data/:rw
+      - grafana_data:/var/lib/grafana/:rw
     networks:
       - parsedmarc-network
     healthcheck:
@@ -20,8 +18,8 @@ services:
   parsedmarc:
     image: patschi/parsedmarc:latest
     volumes:
-      - ./data/conf/parsedmarc/:/etc/parsedmarc/
-      - ./data/data/geoipupdate/:/usr/share/GeoIP:z,ro
+      - parsedmarc_conf:/etc/parsedmarc/
+      - geoip_data:/usr/share/GeoIP:ro
     restart: always
     networks:
       - parsedmarc-network
@@ -30,19 +28,21 @@ services:
         condition: service_healthy
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.2
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
     environment:
       - cluster.name=parsedmarc
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - xpack.security.enabled=false # required to prevent warnings in kibana dashboard. Security is not required as we're only operating docker-internally
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
     ulimits:
       memlock:
         soft: -1
         hard: -1
     volumes:
-      - ./data/data/elasticsearch:/usr/share/elasticsearch/data/
+      - elasticsearch_data:/usr/share/elasticsearch/data/
     restart: always
     networks:
       - parsedmarc-network
@@ -58,23 +58,28 @@ services:
       parsedmarc-init:
         condition: service_started
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:7.17.18
+  grafana:
+    image: grafana/grafana:latest
     environment:
-      - elasticsearch.hosts=http://elasticsearch:9200
-      - telemetry.enabled=false
-      - telemetry.optIn=false
-      - security.showInsecureClusterWarning=false
-    expose: # only expose docker-internally
-      - 5601
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
+      - GF_PLUGINS_PREINSTALL_SYNC=elasticsearch
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./data/conf/grafana/provisioning:/etc/grafana/provisioning:ro
+      - parsedmarc_conf:/etc/parsedmarc:ro
     restart: always
     networks:
       - parsedmarc-network
+    ports:
+      - "${GRAFANA_PORT_BINDING:-3000:3000}"
     depends_on:
       elasticsearch:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD", "curl","-s" ,"-f", "http://localhost:5601/" ]
+      test: [ "CMD", "curl", "-s", "-f", "http://localhost:3000/api/health" ]
       interval: 1m
       timeout: 10s
       retries: 3
@@ -89,24 +94,14 @@ services:
       - GEOIPUPDATE_PRESERVE_FILE_TIMES=1
     restart: always
     volumes:
-      - ./data/data/geoipupdate/:/usr/share/GeoIP:z,rw
-
-  nginx:
-    image: nginx:alpine
-    restart: always
-    ports:
-      - "${PORT_BINDING:-9999:443}"
-    volumes:
-      - ./data/conf/nginx/site.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./data/conf/nginx/ssl/:/etc/nginx/ssl/:ro
-    networks:
-      - parsedmarc-network
-    depends_on:
-      kibana:
-        condition: service_healthy
-      parsedmarc-init:
-        condition: service_healthy
+      - geoip_data:/usr/share/GeoIP/:rw
 
 networks:
   parsedmarc-network:
     driver: bridge
+
+volumes:
+  parsedmarc_conf:
+  elasticsearch_data:
+  grafana_data:
+  geoip_data:

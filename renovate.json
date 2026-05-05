@@ -1,14 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "enabled": true,
-  "timezone": "Europe/Berlin",
+  "timezone": "America/New_York",
   "dependencyDashboard": false,
   "dependencyDashboardTitle": "Renovate Dashboard",
   "rebaseWhen": "auto",
   "labels": ["renovate"],
   "prHourlyLimit": 6,
   "assignees": [
-    "@patschi"
+    "@TerminalSausage"
   ],
   "enabledManagers": ["github-actions", "regex", "docker-compose"],
   "extends": [

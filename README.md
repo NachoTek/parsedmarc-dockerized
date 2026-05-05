@@ -1,29 +1,29 @@
-# parsedmarc-dockerized
+# parsedmarc-dockerized (Grafana Edition)
 
 ## Description
 
-This project's purpose providing an easy way deploying [parsedmarc](https://github.com/domainaware/parsedmarc) in your environment. It has built docker images ready to use, including a small init container to configure some things for you. For any inquries regarding parsedmarc itself, please see mentioned GitHub link of the main project.
+Fork of [patschi/parsedmarc-dockerized](https://github.com/patschi/parsedmarc-dockerized) with **Grafana replacing Kibana** for DMARC report visualization.
 
-**Note**: The standalone `parsedmarc` docker image on [DockerHub @ patschi/parsedmarc](https://hub.docker.com/r/patschi/parsedmarc) can also be used standalone and independently, should there be any interest.
+The upstream project's Kibana dashboards broke when parsedmarc moved to OpenSearch-only dashboard exports (see [patschi/parsedmarc-dockerized#59](https://github.com/patschi/parsedmarc-dockerized/issues/59)). This fork switches to Grafana, which is lighter, better maintained, and has native Elasticsearch datasource support with dashboards provided directly by the parsedmarc project.
+
+### Changes from upstream
+- **Grafana** replaces Kibana for dashboard visualization
+- **Elasticsearch 8.17** replaces 7.17 (required by Grafana ES datasource plugin)
+- **2GB JVM heap** default (up from 512MB) for better performance with growing data
+- **Nginx removed** — use your own reverse proxy (HAProxy, Traefik, etc.) if external access is needed
+- **Auto-provisioned** Elasticsearch datasources and DMARC dashboards
+- Init container downloads dashboards from the parsedmarc Grafana directory
 
 ## Setup
 
 1. Prepare the basics:
 
     ```bash
-    git clone https://github.com/patschi/parsedmarc-dockerized.git /opt/parsedmarc-dockerized/
+    git clone https://github.com/NachoTek/parsedmarc-dockerized.git /opt/parsedmarc-dockerized/
     cp /opt/parsedmarc-dockerized/data/conf/parsedmarc/config.sample.ini /opt/parsedmarc-dockerized/data/conf/parsedmarc/config.ini
     ```
 
-    If needed, Docker might need to be installed. On Debian/Ubuntu, as following:
-
-    ```bash
-    curl -sSL https://get.docker.com/ | CHANNEL=stable sh
-    systemctl enable --now docker
-    apt install docker-compose-plugin
-    ```
-
-2. Next we change the `parsedmarc` config (please make sure to [read the parsedmarc documentation throughly](https://domainaware.github.io/parsedmarc/#configuration-file)). Adjust settings to your needs. (You can set `Test` to `True` for testing purposes.)
+2. Configure parsedmarc (see [parsedmarc documentation](https://domainaware.github.io/parsedmarc/#configuration-file)):
 
     ```bash
     nano /opt/parsedmarc-dockerized/data/conf/parsedmarc/config.ini
@@ -31,7 +31,7 @@ This project's purpose providing an easy way deploying [parsedmarc](https://gith
 
     **Important note**: This project's purpose is NOT to manage this configuration file for you. Should defaults change of the parsedmarc project, you must change the configuration file yourself.
 
-3. Now, we create an environment file containing the geoipupdate settings from your [MaxMind account](https://www.maxmind.com/en/account/sign-in). This allows the respective container to pull the geolocation databases automatically. For update cycles of the databases, please see [here](https://support.maxmind.com/knowledge-base/articles/latency-and-uptime-for-the-geoip-web-services). (Fill in your account details!)
+3. Create the GeoIP environment file from your [MaxMind account](https://www.maxmind.com/en/account/sign-in):
 
     ```bash
     cat > /opt/parsedmarc-dockerized/geoipupdate.env <<EOF
@@ -41,78 +41,104 @@ This project's purpose providing an easy way deploying [parsedmarc](https://gith
     EOF
     ```
 
-4. Finally, we start up the stack and wait:
+4. (Optional) Set Grafana admin credentials in a `.env` file:
+
+    ```bash
+    cat > /opt/parsedmarc-dockerized/.env <<EOF
+    GRAFANA_ADMIN_USER=admin
+    GRAFANA_ADMIN_PASSWORD=changeme
+    EOF
+    ```
+
+5. Start the stack:
 
     ```bash
     cd /opt/parsedmarc-dockerized/
     docker compose up -d
     ```
 
-    **Note**: Depending on your setup, the startup might take couple of minutes - especially the more resource-intensive applications elasticsearch and kibana.
+    **Note**: Startup may take a couple of minutes, especially for Elasticsearch to become healthy.
 
-### What's happening then?
+### What's happening during startup?
 
-Magic.
+1. Containers are created with health-check dependencies (services wait for dependencies to be fully running).
+2. The `parsedmarc-init` container handles preparations: setting ES data permissions, setting Grafana data permissions, and downloading the latest Grafana dashboards from the parsedmarc project.
+3. Grafana starts with auto-provisioned Elasticsearch datasources (`dmarc-ag` for aggregate reports, `dmarc-fo` for forensic reports) and DMARC dashboards.
+4. Access Grafana directly at `http://HOST_IP:3000`.
 
-However, should you still want more details:
+### Accessing Grafana
 
-1. First, containers of the stack are created and started. This might take a while, as several containers have dependencies on others being in a healthy state (meaning that its service must be fully up and running before proceeding).
-2. During the startup of the `parsedmarc-init` container, all required steps and preparations are being taken care of - like generating a self-signed certificate for the included `nginx` webserver.
-3. Once the Kibana container - where you can view the dashboards - is running, the corresponding parsedmarc dashboards are automatically imported into Kibana from the `parsedmarc-init` container.
-4. After some while, when everything is up and running, you can then access Kibana and its dashboards under the shipped reverse proxy at `https://HOST_IP:9999`. (Make sure to use HTTPS!)
-
-**Note:** It is recommended to use some reverse proxy in front of this docker stack, should you want to have parsedmarc exposed externally. Also SSL termination and any authentication should be done externally.
+- **Direct**: `http://HOST_IP:3000` (default port, configurable via `.env`)
+- Default credentials: `admin` / `admin` (change via `.env` file before first start)
+- For external access, place your own reverse proxy (HAProxy, Traefik, Caddy, etc.) in front of Grafana.
 
 ## Configuration
 
 ### Port configuration
 
-Optionally, you can add a `.env` file with the `PORT_BINDING` parameter to configure on which port the reverse proxy is listening for incoming HTTPS connections.
+Create a `.env` file to customize:
 
-Format: `[address:]port:443` (`address` is optional. `443` MUST NOT be changed)  
-Additional information: [docs.docker.com/engine/reference/commandline/run/#publish-or-expose-port--p---expose](https://docs.docker.com/engine/reference/commandline/run/#publish-or-expose-port--p---expose)
+```bash
+# Grafana direct access (HTTP) — default: 3000
+GRAFANA_PORT_BINDING=3000:3000
+
+# Grafana admin credentials
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=changeme
+
+# Grafana root URL (update if behind a reverse proxy)
+GRAFANA_ROOT_URL=http://your-host:3000
+```
 
 **Examples:**
 
 ```bash
-# this is the current default if nothing specified
-PORT_BINDING=9999:443
+# Only listen on localhost
+GRAFANA_PORT_BINDING=127.0.0.1:3000:3000
 
-# change listening port to 8888
-PORT_BINDING=8888:443
-
-# don't expose it to the internet, only listen on the host itself
-PORT_BINDING=127.0.0.1:9999:443
+# Change Grafana port
+GRAFANA_PORT_BINDING=8080:3000
 ```
 
-By default `parsedmarc-dockerized` is listening at port `9999` on all interfaces.
+### Multi-tenant (index prefix domain map)
 
-If you're running `parsedmarc-dockerized` on a server without a firewall it's freely accessible over the internet by everyone. If you want it to only listen on the host itself, you can use the example above.
+If using `index_prefix_domain_map` in your parsedmarc config to separate tenants (e.g., `companya_dmarc_aggregate*`, `companyb_dmarc_aggregate*`), the pre-configured Elasticsearch datasources use wildcard index patterns (`*_dmarc_aggregate*` and `*_dmarc_forensic*`) that will match all tenant indices.
 
-You can then use an SSH tunnel to make it accessible on your local machine. On Linux and macOS this works with the command `ssh -NL 9999:127.0.0.1:9999 USER@HOST` (make sure to set `USER@HOST` for your server). If the SSH tunnel was successfully established you can access Kibana and its dashboards on your local machine via `https://localhost:9999`. (Make sure to use HTTPS!).
+The dashboards include a `fromdomain` variable to filter by domain.
+
+### Elasticsearch memory
+
+Default JVM heap is 2GB (`ES_JAVA_OPTS=-Xms2g -Xmx2g`). For small deployments with few domains, you can reduce to 1GB. For large deployments with many domains, increase to 4GB. Remember to leave sufficient memory for the OS filesystem cache.
 
 ## Credits
 
-Built with awesome [parsedmarc](https://github.com/domainaware/parsedmarc), [Elasticsearch and Kibana](https://www.elastic.co/), [nginx](https://nginx.org), [Docker](https://docker.com) and [MaxMind GeoIP](https://dev.maxmind.com/geoip/geoip2/geolite2/). Together with [awesome contributors](https://github.com/patschi/parsedmarc-dockerized/graphs/contributors) in this project.
+Built with [parsedmarc](https://github.com/domainaware/parsedmarc), [Elasticsearch](https://www.elastic.co/), [Grafana](https://grafana.com/), [Docker](https://docker.com), and [MaxMind GeoIP](https://dev.maxmind.com/geoip/geoip2/geolite2/).
+
+Based on [patschi/parsedmarc-dockerized](https://github.com/patschi/parsedmarc-dockerized) by Patrik Kernstock.
 
 ## Troubleshooting
 
-### Error 'No matching indices found: No indices match pattern "dmarc_aggregate*"' in Kibana dashboard
+### No data showing in Grafana dashboards
 
-This typically means that no data has been imported by parsedmarc in elasticsearch yet. See [github.com/domainaware/parsedmarc/issues/268](https://github.com/domainaware/parsedmarc/issues/268) for reference. parsedmarc processes certain amount of emails (see `batch_size` in documentation) before saving the data to elasticsearch.
+parsedmarc processes a certain number of emails (see `batch_size` in documentation) before saving to Elasticsearch. Check parsedmarc logs:
 
-For example, debug logs from parsedmarc will indicate that indices will be only created upon saving a report to elasticsearch:
-
-```text
-    INFO:__init__.py:1019:Parsing mail from postmaster@example.com on 2020-09-19 23:04:13+00:00
-    INFO:elastic.py:364:Saving aggregate report to Elasticsearch
-   DEBUG:elastic.py:284:Creating Elasticsearch index: dmarc_aggregate-2020-09-17
+```bash
+docker logs --tail 50 dmarc-tool-parsedmarc-1
 ```
 
-### I am seeing 'Unrecognized layerType EMS_VECTOR_TILE'
+You should see entries like:
+```text
+INFO:__init__.py:1019:Parsing mail from postmaster@example.com on 2020-09-19 23:04:13+00:00
+INFO:elastic.py:364:Saving aggregate report to Elasticsearch
+DEBUG:elastic.py:284:Creating Elasticsearch index: companya_dmarc_aggregate-2020-09-17
+```
 
-There might have been changes to the dashboard view of parsedmarc, requiring new layer types older Kibana/Elasticsearch versions do not support.
+### Elasticsearch out of memory
 
-**Fix:**
-Update to Elasticsearch/Kibana 8.x.
+If Elasticsearch logs show `OutOfMemoryError`, increase the JVM heap in `docker-compose.yml`:
 
+```yaml
+- "ES_JAVA_OPTS=-Xms4g -Xmx4g"
+```
+
+Make sure the host has enough RAM (heap + ~2x overhead for filesystem cache).

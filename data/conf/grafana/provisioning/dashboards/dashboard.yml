@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: 'DMARC'
+    orgId: 1
+    folder: 'DMARC'
+    folderUid: 'dmarc'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 86400
+    allowUiUpdates: true
+    options:
+      path: /etc/parsedmarc/grafana_dashboards
+      foldersFromFilesStructure: false
