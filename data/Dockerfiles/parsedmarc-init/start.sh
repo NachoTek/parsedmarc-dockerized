@@ -21,9 +21,11 @@ if [ ! -d "${dashboardDir}" ]; then
 	mkdir -p "${dashboardDir}"
 fi
 
-echo "Downloading Grafana dashboards from GitHub..."
+echo "Copying NachoTek-patched Grafana dashboards..."
 
-# Dashboard URLs from the parsedmarc project
+# Local dashboards with data-link drill-downs (our patches on top of upstream)
+# Falls back to upstream if local copy is missing
+LOCAL_DASH_DIR="/opt/dashboards"
 DASH_URL_1="https://raw.githubusercontent.com/domainaware/parsedmarc/master/dashboards/grafana/Grafana-DMARC_Reports.json"
 DASH_URL_2="https://raw.githubusercontent.com/domainaware/parsedmarc/master/dashboards/grafana/Grafana-DMARC_Reports.json-new_panel.json"
 
@@ -32,7 +34,15 @@ for url in $DASH_URL_1 $DASH_URL_2; do
 	target="${dashboardDir}/${filename}"
 	tmpfile="${target}.tmp"
 
-	curl -sL "$url" -o "$tmpfile"
+	# Prefer local patched copy if available
+	if [ -f "${LOCAL_DASH_DIR}/${filename}" ]; then
+		echo "Using local patched dashboard: ${filename}"
+		cp "${LOCAL_DASH_DIR}/${filename}" "${tmpfile}"
+	else
+		echo "No local copy for ${filename}, downloading from upstream..."
+		curl -sL "$url" -o "$tmpfile"
+	fi
+
 	if [ $? -ne 0 ]; then
 		echo "Download failed for ${filename}"
 		continue
